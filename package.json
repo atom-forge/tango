@@ -1,0 +1,27 @@
+{
+	"name": "@atom-forge/tango-rpc",
+	"version": "0.1.4",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"repository": {
+		"url": "git://github.com/atom-forge/tango-rpc.git"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsc"
+	},
+	"dependencies": {
+		"msgpackr": "^1.11.5",
+		"@sveltejs/kit": "^2.22.0",
+		"cookie": "^0.6.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"typescript": "^5.0.0",
+		"@types/node": "^20.0.0",
+		"@types/cookie": "^0.6.0"
+	}
+}
