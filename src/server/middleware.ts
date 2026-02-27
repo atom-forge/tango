@@ -1,5 +1,5 @@
-import type { ServerContext } from "./server-context.js";
-import type { ServerMiddleware } from "./types.js";
+import type {ServerContext} from "./server-context.js";
+import type {ServerMiddleware} from "./types.js";
 
 const MIDDLEWARE = Symbol("MIDDLEWARE");
 
@@ -8,7 +8,7 @@ const MIDDLEWARE = Symbol("MIDDLEWARE");
  * @internal
  */
 export function getMiddlewares<T = any>(target: any): T[] {
-  return target[MIDDLEWARE] || [];
+	return target[MIDDLEWARE] || [];
 }
 
 /**
@@ -18,18 +18,18 @@ export function getMiddlewares<T = any>(target: any): T[] {
  * @internal
  */
 export function addMiddleware<TARGET>(
-  target: TARGET,
-  middleware: ServerMiddleware | ServerMiddleware[],
+	target: TARGET,
+	middleware: ServerMiddleware | ServerMiddleware[],
 ): TARGET {
-  if (Array.isArray(target)) {
-    target.forEach((item) => addMiddleware(item, middleware));
-  } else {
-    if (!Array.isArray(middleware)) middleware = [middleware];
-    const t = target as any;
-    if (!Array.isArray(t[MIDDLEWARE])) t[MIDDLEWARE] = [];
-    t[MIDDLEWARE].push(...middleware);
-  }
-  return target;
+	if (Array.isArray(target)) {
+		target.forEach((item) => addMiddleware(item, middleware));
+	} else {
+		if (!Array.isArray(middleware)) middleware = [middleware];
+		const t = target as any;
+		if (!Array.isArray(t[MIDDLEWARE])) t[MIDDLEWARE] = [];
+		t[MIDDLEWARE].push(...middleware);
+	}
+	return target;
 }
 
 /**
@@ -38,12 +38,12 @@ export function addMiddleware<TARGET>(
  * @param accessors
  */
 export function makeServerMiddleware<
-  ACCESSORS extends { [key: string]: (ctx: ServerContext) => any },
+	ACCESSORS extends { [key: string]: (ctx: ServerContext) => any },
 >(
-  middleware: ServerMiddleware,
-  accessors?: ACCESSORS,
+	middleware: ServerMiddleware,
+	accessors?: ACCESSORS,
 ): ServerMiddleware & ACCESSORS {
-  const handler = middleware as any;
-  if (accessors) Object.assign(handler, accessors);
-  return handler;
+	const handler = middleware as any;
+	if (accessors) Object.assign(handler, accessors);
+	return handler;
 }

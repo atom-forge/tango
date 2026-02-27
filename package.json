@@ -1,6 +1,6 @@
 {
 	"name": "@atom-forge/tango-rpc",
-	"version": "0.1.4",
+	"version": "0.1.7",
 	"type": "module",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -14,14 +14,12 @@
 		"build": "tsc"
 	},
 	"dependencies": {
-		"msgpackr": "^1.11.5",
-		"@sveltejs/kit": "^2.22.0",
-		"cookie": "^0.6.0",
-		"zod": "^3.24.2"
+		"msgpackr": "^1.11.8",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
+		"@sveltejs/kit": "^2.53.2",
 		"typescript": "^5.0.0",
-		"@types/node": "^20.0.0",
-		"@types/cookie": "^0.6.0"
+		"@types/node": "^25.3.1"
 	}
 }

@@ -1,16 +1,12 @@
-import type { RequestEvent } from "@sveltejs/kit";
-import { Packr } from "msgpackr";
-import { z } from "zod";
-import { pipeline } from "../util/pipeline.js";
-import { getMiddlewares } from "./middleware.js";
-import { ServerContext } from "./server-context.js";
-import type {
-  ApiDefinition,
-  RpcMethodImplementationDescriptor,
-  ServerMiddleware,
-} from "./types.js";
+import type {RequestEvent} from "@sveltejs/kit";
+import {Packr} from "msgpackr";
+import {z} from "zod";
+import {pipeline} from "../util/pipeline.js";
+import {getMiddlewares} from "./middleware.js";
+import {ServerContext} from "./server-context.js";
+import type {ApiDefinition, RpcMethodImplementationDescriptor, ServerMiddleware,} from "./types.js";
 
-const packr = new Packr({ structuredClone: true, useRecords: true });
+const packr = new Packr({structuredClone: true, useRecords: true});
 const acceptedRequests = ["GET.query", "GET.get", "POST.command"];
 const acceptedMethods = ["GET", "POST"];
 
@@ -25,98 +21,97 @@ const acceptedMethods = ["GET", "POST"];
  *                                                     and returns appropriate HTTP responses.
  */
 export function createHandler<
-  SERVER_CONTEXT extends ServerContext = ServerContext,
-  DEF extends ApiDefinition<any> = ApiDefinition<any>,
+	SERVER_CONTEXT extends ServerContext = ServerContext,
+	DEF extends ApiDefinition<any> = ApiDefinition<any>,
 >(
-  apiDefinition: DEF,
-  options?: {
-    createServerContext?: (args: any, event: RequestEvent) => SERVER_CONTEXT;
-  },
+	apiDefinition: DEF,
+	options?: {
+		createServerContext?: (args: any, event: RequestEvent) => SERVER_CONTEXT;
+	},
 ): [(arg0: RequestEvent) => Promise<Response>, DEF] {
-  const createServerContext =
-    options?.createServerContext ||
-    ((args: any, event: RequestEvent) =>
-      new ServerContext(args, event) as SERVER_CONTEXT);
-  const handler = async function handler(
-    event: RequestEvent,
-  ): Promise<Response> {
-    const params = event.params;
-    const request = event.request;
+	const createServerContext =
+		options?.createServerContext ||
+		((args: any, event: RequestEvent) =>
+			new ServerContext(args, event) as SERVER_CONTEXT);
+	const handler = async function handler(
+		event: RequestEvent,
+	): Promise<Response> {
+		const params = event.params;
+		const request = event.request;
 
-    if (!acceptedMethods.includes(request.method))
-      return new Response("Method not allowed", { status: 405 });
-    if (!params.path)
-      return new Response("RPC method not found", { status: 404 });
+		if (!acceptedMethods.includes(request.method))
+			return new Response("Method not allowed", {status: 405});
+		if (!params.path)
+			return new Response("RPC method not found", {status: 404});
 
-    const [descriptor, middlewares] = findRpcMethodDescriptor(
-      params.path.split("/"),
-      apiDefinition,
-    );
-    if (!descriptor)
-      return new Response("RPC method not found", { status: 404 });
+		const [descriptor, middlewares] = findRpcMethodDescriptor(
+			params.path.split("/"),
+			apiDefinition,
+		);
+		if (!descriptor)
+			return new Response("RPC method not found", {status: 404});
 
-    const { rpcType, implementation, zodSchema } = descriptor;
-    if (!acceptedRequests.includes(request.method + "." + rpcType))
-      return new Response(
-        `RPC type ${rpcType} not allowed for ${request.method} requests`,
-        { status: 405 },
-      );
+		const {rpcType, implementation, zodSchema} = descriptor;
+		if (!acceptedRequests.includes(request.method + "." + rpcType))
+			return new Response(
+				`RPC type ${rpcType} not allowed for ${request.method} requests`,
+				{status: 405},
+			);
 
-    let args: any;
+		let args: any;
 
-    try {
-      switch (rpcType) {
-        case "get":
-          args = parseGet(new URL(request.url));
-          break;
-        case "query":
-          args = parseQuery(new URL(request.url));
-          break;
-        case "command":
-          const requestContentType = request.headers.get("Content-Type") || "";
-          if (requestContentType.includes("multipart/form-data")) {
-            args = await parseCommandMultipartFormData(request);
-          } else if (requestContentType.includes("application/json")) {
-            args = await parseCommandJson(request);
-          } else {
-            args = await parseCommandMsgpackr(request);
-          }
-          break;
-      }
-    } catch (e) {
-      if (e instanceof ParseError)
-        return new Response(e.message, { status: 400 });
-      //todo: log error
-      console.log(e);
-      return new Response("Internal server error", { status: 500 });
-    }
+		try {
+			switch (rpcType) {
+				case "get":
+					args = parseGet(new URL(request.url));
+					break;
+				case "query":
+					args = parseQuery(new URL(request.url));
+					break;
+				case "command":
+					const requestContentType = request.headers.get("Content-Type") || "";
+					if (requestContentType.includes("multipart/form-data")) {
+						args = await parseCommandMultipartFormData(request);
+					} else if (requestContentType.includes("application/json")) {
+						args = await parseCommandJson(request);
+					} else {
+						args = await parseCommandMsgpackr(request);
+					}
+					break;
+			}
+		} catch (e) {
+			if (e instanceof ParseError)
+				return new Response(e.message, {status: 400});
+			console.error("[tango] Unexpected error during request parsing:", e);
+			return new Response("Internal server error", {status: 500});
+		}
 
-    let result: any;
+		let result: any;
 
-    const ctx = createServerContext(args, event);
+		const ctx = createServerContext(args, event);
 
-    try {
-      result = await pipeline(ctx, ...middlewares, (ctx) => {
-        let args = ctx.getArgs();
-        if (zodSchema) args = zodSchema.parse(args);
-        return (
-          implementation as (args: any, ctx: SERVER_CONTEXT) => Promise<any>
-        )(args, ctx);
-      });
-      return makeResponse(result, ctx);
-    } catch (e) {
-      if (e instanceof z.ZodError) {
-        ctx.headers.response.set("X-Tango-Validation-Error", "true");
-        ctx.cache.set(0);
-        ctx.status.set(422);
-        return makeResponse(e.issues, ctx);
-      }
-      //TODO: Log error
-      console.error(e);
-      return new Response(`Internal server error`, { status: 500 });
-    }
-  };
-  return [handler, apiDefinition];
+		try {
+			result = await pipeline(ctx, ...middlewares, (ctx) => {
+				let args = ctx.getArgs();
+				if (zodSchema) args = zodSchema.parse(args);
+				return (
+					implementation as (args: any, ctx: SERVER_CONTEXT) => Promise<any>
+				)(args, ctx);
+			});
+			return makeResponse(result, ctx);
+		} catch (e) {
+			if (e instanceof z.ZodError) {
+				ctx.headers.response.set("X-Tango-Validation-Error", "true");
+				ctx.cache.set(0);
+				ctx.status.set(422);
+				return makeResponse(e.issues, ctx);
+			}
+			//TODO: Log error
+			console.error("[tango] Unhandled error in RPC handler:", e);
+			return new Response(`Internal server error`, {status: 500});
+		}
+	};
+	return [handler, apiDefinition];
 }
 
 /**
@@ -127,34 +122,31 @@ export function createHandler<
  * @return {Response} The constructed HTTP response.
  */
 function makeResponse(result: any, ctx: ServerContext): Response {
-  const prefersJson = ctx.event.request.headers
-    .get("Accept")
-    ?.includes("application/json");
-  ctx.headers.response.set("X-Tango-Execution-Time", `${ctx.elapsedTime}`);
-  ctx.headers.response.set(
-    "Content-Type",
-    prefersJson ? "application/json" : "application/msgpack",
-  );
-  if (ctx.event.request.method === "GET" && ctx.cache.get()) {
-    ctx.headers.response.set(
-      "Cache-Control",
-      `public, max-age=${ctx.cache.get()}`,
-    );
-  }
+	const prefersJson = ctx.event.request.headers
+		.get("Accept")
+		?.includes("application/json");
+	ctx.headers.response.set("X-Tango-Execution-Time", `${ctx.elapsedTime}`);
+	ctx.headers.response.set(
+		"Content-Type",
+		prefersJson ? "application/json" : "application/msgpack",
+	);
+	if (ctx.event.request.method === "GET" && ctx.cache.get()) {
+		ctx.headers.response.set(
+			"Cache-Control",
+			`public, max-age=${ctx.cache.get()}`,
+		);
+	}
 
-  let body = prefersJson
-    ? JSON.stringify(result)
-    : (() => {
-        const packed = packr.pack(result);
-        const responseArray = new Uint8Array(packed.length);
-        responseArray.set(packed);
-        responseArray.buffer;
-        return responseArray;
-      })();
-  return new Response(body, {
-    headers: ctx.headers.response,
-    status: ctx.status.get(),
-  });
+	let body: string | Uint8Array;
+	if (prefersJson) {
+		body = JSON.stringify(result);
+	} else {
+		body = new Uint8Array(packr.pack(result));
+	}
+	return new Response(body as BodyInit, {
+		headers: ctx.headers.response,
+		status: ctx.status.get(),
+	});
 }
 
 /**
@@ -164,9 +156,9 @@ function makeResponse(result: any, ctx: ServerContext): Response {
  * @return {Record<string, any>} An object containing the query parameters as key-value pairs.
  */
 function parseGet(url: URL): Record<string, any> {
-  let args: Record<string, any> = {};
-  url.searchParams.forEach((value, key) => (args[key] = value));
-  return args;
+	let args: Record<string, any> = {};
+	url.searchParams.forEach((value, key) => (args[key] = value));
+	return args;
 }
 
 /**
@@ -177,18 +169,18 @@ function parseGet(url: URL): Record<string, any> {
  * @throws {ParseError} If the "args" parameter cannot be unpacked due to an invalid msgpackr body.
  */
 function parseQuery(url: URL): Record<string, any> {
-  let args: Record<string, any> = {};
-  try {
-    const argsParam = url.searchParams.get("args");
-    if (argsParam)
-      args = packr.unpack(Buffer.from(argsParam, "base64url")) as Record<
-        string,
-        any
-      >;
-  } catch (e) {
-    throw new ParseError("Invalid msgpackr body");
-  }
-  return args;
+	let args: Record<string, any> = {};
+	try {
+		const argsParam = url.searchParams.get("args");
+		if (argsParam)
+			args = packr.unpack(Buffer.from(argsParam, "base64url")) as Record<
+				string,
+				any
+			>;
+	} catch (e) {
+		throw new ParseError("Invalid msgpackr body");
+	}
+	return args;
 }
 
 /**
@@ -199,16 +191,16 @@ function parseQuery(url: URL): Record<string, any> {
  * @throws {ParseError} If the request body cannot be parsed as valid MessagePack.
  */
 async function parseCommandMsgpackr(
-  request: Request,
+	request: Request,
 ): Promise<Record<string, any>> {
-  let args: Record<string, any> = {};
-  try {
-    const buffer = new Uint8Array(await request.arrayBuffer());
-    if (buffer.length > 0) args = packr.unpack(buffer) || {};
-  } catch (e) {
-    throw new ParseError("Invalid msgpackr body");
-  }
-  return args;
+	let args: Record<string, any> = {};
+	try {
+		const buffer = new Uint8Array(await request.arrayBuffer());
+		if (buffer.length > 0) args = packr.unpack(buffer) || {};
+	} catch (e) {
+		throw new ParseError("Invalid msgpackr body");
+	}
+	return args;
 }
 
 /**
@@ -219,16 +211,16 @@ async function parseCommandMsgpackr(
  * @throws {ParseError} If the JSON body is invalid or cannot be parsed.
  */
 async function parseCommandJson(
-  request: Request,
+	request: Request,
 ): Promise<Record<string, any>> {
-  let args: Record<string, any> = {};
-  try {
-    const text = await request.text();
-    if (text) args = JSON.parse(text) || {};
-  } catch (e) {
-    throw new ParseError("Invalid JSON body");
-  }
-  return args;
+	let args: Record<string, any> = {};
+	try {
+		const text = await request.text();
+		if (text) args = JSON.parse(text) || {};
+	} catch (e) {
+		throw new ParseError("Invalid JSON body");
+	}
+	return args;
 }
 
 /**
@@ -242,44 +234,44 @@ async function parseCommandJson(
  * @throws {ParseError} If the "args" field is in an unsupported format or contains invalid data.
  */
 async function parseCommandMultipartFormData(
-  request: Request,
+	request: Request,
 ): Promise<Record<string, any>> {
-  let args: Record<string, any> = {};
-  const formData = await request.formData();
-  const argsBlob = formData.get("args");
-  if (argsBlob instanceof Blob) {
-    const buffer = new Uint8Array(await argsBlob.arrayBuffer());
-    switch (argsBlob.type) {
-      case "application/json":
-        try {
-          args = JSON.parse(new TextDecoder().decode(buffer)) || {};
-        } catch (e) {
-          throw new ParseError("Invalid JSON in args blob");
-        }
-        break;
-      case "application/msgpack":
-        try {
-          args = packr.unpack(buffer) || {};
-        } catch (e) {
-          throw new ParseError("Invalid msgpack in args blob");
-        }
-        break;
-      default:
-        throw new ParseError(`Unsupported args type: ${argsBlob.type}`);
-    }
-  }
+	let args: Record<string, any> = {};
+	const formData = await request.formData();
+	const argsBlob = formData.get("args");
+	if (argsBlob instanceof Blob) {
+		const buffer = new Uint8Array(await argsBlob.arrayBuffer());
+		switch (argsBlob.type) {
+			case "application/json":
+				try {
+					args = JSON.parse(new TextDecoder().decode(buffer)) || {};
+				} catch (e) {
+					throw new ParseError("Invalid JSON in args blob");
+				}
+				break;
+			case "application/msgpack":
+				try {
+					args = packr.unpack(buffer) || {};
+				} catch (e) {
+					throw new ParseError("Invalid msgpack in args blob");
+				}
+				break;
+			default:
+				throw new ParseError(`Unsupported args type: ${argsBlob.type}`);
+		}
+	}
 
-  const keys = new Set<string>();
-  formData.forEach((_, key) => keys.add(key));
-  for (const key of keys) {
-    if (key === "args") continue;
-    if (key.endsWith("[]")) {
-      args[key.substring(0, key.length - 2)] = formData.getAll(key);
-    } else {
-      args[key] = formData.get(key);
-    }
-  }
-  return args;
+	const keys = new Set<string>();
+	formData.forEach((_, key) => keys.add(key));
+	for (const key of keys) {
+		if (key === "args") continue;
+		if (key.endsWith("[]")) {
+			args[key.substring(0, key.length - 2)] = formData.getAll(key);
+		} else {
+			args[key] = formData.get(key);
+		}
+	}
+	return args;
 }
 
 /**
@@ -291,32 +283,32 @@ async function parseCommandMultipartFormData(
  *         and the second element is an array of server middleware associated with the path.
  */
 function findRpcMethodDescriptor(
-  pathSegments: string[],
-  apiDefinition: ApiDefinition<any>,
+	pathSegments: string[],
+	apiDefinition: ApiDefinition<any>,
 ): [
-  RpcMethodImplementationDescriptor<any, any, any> | undefined,
-  ServerMiddleware[],
+		RpcMethodImplementationDescriptor<any, any, any> | undefined,
+	ServerMiddleware[],
 ] {
-  let current: any = apiDefinition;
-  const middlewares: ServerMiddleware[] = getMiddlewares(apiDefinition);
+	let current: any = apiDefinition;
+	const middlewares: ServerMiddleware[] = [...getMiddlewares(apiDefinition)];
 
-  for (let i = 0; i < pathSegments.length; i++) {
-    const segment = pathSegments[i];
+	for (let i = 0; i < pathSegments.length; i++) {
+		const segment = pathSegments[i];
 
-    if (current && typeof current === "object" && segment in current) {
-      current = current[segment];
-      middlewares.push(...getMiddlewares(current));
-      if (i === pathSegments.length - 1) {
-        return current && typeof current === "object" && "rpcType" in current
-          ? [
-              current as RpcMethodImplementationDescriptor<any, any, any>,
-              middlewares,
-            ]
-          : [undefined, []];
-      }
-    } else return [undefined, []];
-  }
-  return [undefined, []];
+		if (current && typeof current === "object" && segment in current) {
+			current = current[segment];
+			middlewares.push(...getMiddlewares(current));
+			if (i === pathSegments.length - 1) {
+				return current && typeof current === "object" && "rpcType" in current
+					? [
+						current as RpcMethodImplementationDescriptor<any, any, any>,
+						middlewares,
+					]
+					: [undefined, []];
+			}
+		} else return [undefined, []];
+	}
+	return [undefined, []];
 }
 
 /**

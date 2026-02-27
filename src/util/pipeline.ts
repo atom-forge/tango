@@ -9,27 +9,39 @@
  * @internal
  */
 export type Middleware<STATE = any, RESULT = any> = (
-  state: STATE,
-  next: () => Promise<RESULT>,
+	state: STATE,
+	next: () => Promise<RESULT>,
 ) => Promise<RESULT>;
 
 /**
  * Executes a pipeline of middlewares in a specific order.
  *
  * @param {STATE} state - The state object to pass through the pipeline.
- * @param {Array<MiddlewareFn<STATE> | Middleware<STATE>} middlewares - The middlewares to execute in the pipeline.
+ * @param {Array<Middleware<STATE, RESULT>>} middlewares - The middlewares to execute in the pipeline.
  * @returns {Promise<any>} A promise that resolves after executing all middlewares in the pipeline.
  * @template STATE - The type of the state object.
- * @template RES - The type of the result object.
+ * @template RESULT - The type of the result object.
  *
  * @internal
  */
 export async function pipeline<STATE = any, RESULT = any>(
-  state: STATE,
-  ...middlewares: Array<Middleware<STATE, RESULT>>
-): Promise<any> {
-  const middleware: Middleware | undefined = middlewares.shift();
-  if (middleware === undefined) throw Error("Middleware not found!");
-  const next: () => Promise<any> = () => pipeline(state, ...middlewares);
-  return await middleware(state, next);
+	state: STATE,
+	...middlewares: Array<Middleware<STATE, RESULT>>
+): Promise<RESULT> {
+	return await execute(state, middlewares, 0);
+}
+
+async function execute<STATE = any, RESULT = any>(
+	state: STATE,
+	middlewares: Array<Middleware<STATE, RESULT>>,
+	index: number,
+): Promise<RESULT> {
+	const middleware = middlewares[index];
+	if (!middleware) {
+		throw new Error(
+			"Pipeline exhausted. Make sure the last middleware in the chain returns a result without calling next().",
+		);
+	}
+	const next = () => execute(state, middlewares, index + 1);
+	return await middleware(state, next);
 }
