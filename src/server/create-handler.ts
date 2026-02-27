@@ -5,10 +5,42 @@ import {pipeline} from "../util/pipeline.js";
 import {getMiddlewares} from "./middleware.js";
 import {ServerContext} from "./server-context.js";
 import type {ApiDefinition, RpcMethodImplementationDescriptor, ServerMiddleware,} from "./types.js";
+import {camelToKebabCase} from "../util/string.js";
 
 const packr = new Packr({structuredClone: true, useRecords: true});
 const acceptedRequests = ["GET.query", "GET.get", "POST.command"];
 const acceptedMethods = ["GET", "POST"];
+
+function flattenApiDefinition(
+	apiDefinition: ApiDefinition<any>,
+): Map<string, {rpcType: string; handler: (ctx: ServerContext) => Promise<any>}> {
+	const map = new Map<string, {rpcType: string; handler: (ctx: ServerContext) => Promise<any>}>();
+
+	function traverse(obj: any, prefix: string, inheritedMiddlewares: ServerMiddleware[]) {
+		const middlewares = [...inheritedMiddlewares, ...getMiddlewares<ServerMiddleware>(obj)];
+		for (const key of Object.keys(obj)) {
+			const value = obj[key];
+			if (!value || typeof value !== "object") continue;
+			const fullKey = prefix ? `${prefix}.${camelToKebabCase(key)}` : camelToKebabCase(key);
+			if ("rpcType" in value) {
+				const {rpcType, implementation, zodSchema} = value as RpcMethodImplementationDescriptor<any, any, any>;
+				const methodMiddlewares = [...middlewares, ...getMiddlewares<ServerMiddleware>(value)];
+				const handler = (ctx: ServerContext) =>
+					pipeline(ctx, ...methodMiddlewares, (ctx) => {
+						let args = ctx.getArgs();
+						if (zodSchema) args = zodSchema.parse(args);
+						return (implementation as (args: any, ctx: ServerContext) => Promise<any>)(args, ctx);
+					});
+				map.set(fullKey, {rpcType, handler});
+			} else {
+				traverse(value, fullKey, middlewares);
+			}
+		}
+	}
+
+	traverse(apiDefinition, "", []);
+	return map;
+}
 
 /**
  * Creates a handler function for processing API requests based on the given API definition.
@@ -16,7 +48,6 @@ const acceptedMethods = ["GET", "POST"];
  * @param {ApiDefinition<any>} apiDefinition - The API definition which describes the methods, their types,
  *                                             and middlewares for handling the request.
  * @param options
- * @param middlewares
  * @return {function(RequestEvent): Promise<Response>} An async function that handles incoming requests
  *                                                     and returns appropriate HTTP responses.
  */
@@ -33,6 +64,7 @@ export function createHandler<
 		options?.createServerContext ||
 		((args: any, event: RequestEvent) =>
 			new ServerContext(args, event) as SERVER_CONTEXT);
+	const endpointMap = flattenApiDefinition(apiDefinition);
 	const handler = async function handler(
 		event: RequestEvent,
 	): Promise<Response> {
@@ -44,14 +76,11 @@ export function createHandler<
 		if (!params.path)
 			return new Response("RPC method not found", {status: 404});
 
-		const [descriptor, middlewares] = findRpcMethodDescriptor(
-			params.path.split("/"),
-			apiDefinition,
-		);
-		if (!descriptor)
+		const entry = endpointMap.get(params.path);
+		if (!entry)
 			return new Response("RPC method not found", {status: 404});
 
-		const {rpcType, implementation, zodSchema} = descriptor;
+		const {rpcType, handler: rpcHandler} = entry;
 		if (!acceptedRequests.includes(request.method + "." + rpcType))
 			return new Response(
 				`RPC type ${rpcType} not allowed for ${request.method} requests`,
@@ -74,8 +103,10 @@ export function createHandler<
 						args = await parseCommandMultipartFormData(request);
 					} else if (requestContentType.includes("application/json")) {
 						args = await parseCommandJson(request);
-					} else {
+					} else if (requestContentType.includes("application/msgpack") || requestContentType === "") {
 						args = await parseCommandMsgpackr(request);
+					} else {
+						return new Response(`Unsupported Content-Type: ${requestContentType}`, {status: 415});
 					}
 					break;
 			}
@@ -91,13 +122,7 @@ export function createHandler<
 		const ctx = createServerContext(args, event);
 
 		try {
-			result = await pipeline(ctx, ...middlewares, (ctx) => {
-				let args = ctx.getArgs();
-				if (zodSchema) args = zodSchema.parse(args);
-				return (
-					implementation as (args: any, ctx: SERVER_CONTEXT) => Promise<any>
-				)(args, ctx);
-			});
+			result = await rpcHandler(ctx);
 			return makeResponse(result, ctx);
 		} catch (e) {
 			if (e instanceof z.ZodError) {
@@ -274,42 +299,6 @@ async function parseCommandMultipartFormData(
 	return args;
 }
 
-/**
- * Finds the RPC method descriptor and associated server middleware for a specified path in the API definition.
- *
- * @param pathSegments An array of strings representing the segments of the path being searched.
- * @param apiDefinition The API definition object containing RPC method implementations and middleware.
- * @return A tuple where the first element is the found RPC method descriptor or undefined if no matching method is found,
- *         and the second element is an array of server middleware associated with the path.
- */
-function findRpcMethodDescriptor(
-	pathSegments: string[],
-	apiDefinition: ApiDefinition<any>,
-): [
-		RpcMethodImplementationDescriptor<any, any, any> | undefined,
-	ServerMiddleware[],
-] {
-	let current: any = apiDefinition;
-	const middlewares: ServerMiddleware[] = [...getMiddlewares(apiDefinition)];
-
-	for (let i = 0; i < pathSegments.length; i++) {
-		const segment = pathSegments[i];
-
-		if (current && typeof current === "object" && segment in current) {
-			current = current[segment];
-			middlewares.push(...getMiddlewares(current));
-			if (i === pathSegments.length - 1) {
-				return current && typeof current === "object" && "rpcType" in current
-					? [
-						current as RpcMethodImplementationDescriptor<any, any, any>,
-						middlewares,
-					]
-					: [undefined, []];
-			}
-		} else return [undefined, []];
-	}
-	return [undefined, []];
-}
 
 /**
  * Represents an error that occurs during parsing operations.

@@ -1,196 +1,70 @@
 import {z} from "zod";
 import {addMiddleware} from "./middleware.js";
 import type {ServerContext} from "./server-context.js";
+import type {RpcMethodImplementationDescriptor, ServerMiddleware} from "./types.js";
 
-import type {RpcMethodImplementationDescriptor, ServerMiddleware,} from "./types.js";
+type RpcType = "query" | "command" | "get";
 
 export function tangoFactory<
 	SERVER_CONTEXT extends ServerContext = ServerContext,
 >() {
-	return {
-		query: <ARGS, RET>(
-			implementation: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>,
-		): RpcMethodImplementationDescriptor<ARGS, RET, "query"> => ({
-			rpcType: "query",
+	function makeDescriptor<Type extends RpcType, ARGS, RET>(
+		rpcType: Type,
+		implementation: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>,
+		zodSchema?: z.ZodSchema<ARGS>,
+		middleware?: ServerMiddleware | ServerMiddleware[],
+	): RpcMethodImplementationDescriptor<ARGS, RET, Type> {
+		const descriptor: RpcMethodImplementationDescriptor<ARGS, RET, Type> = {
+			rpcType,
 			implementation: implementation as (args: ARGS) => RET | Promise<RET>,
-		}),
-		command: <ARGS, RET>(
-			implementation: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>,
-		): RpcMethodImplementationDescriptor<ARGS, RET, "command"> => ({
-			rpcType: "command",
-			implementation: implementation as (args: ARGS) => RET | Promise<RET>,
-		}),
-		get: <ARGS, RET>(
-			implementation: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>,
-		): RpcMethodImplementationDescriptor<ARGS, RET, "get"> => ({
-			rpcType: "get",
-			implementation: implementation as (args: ARGS) => RET | Promise<RET>,
-		}),
+			...(zodSchema && {zodSchema}),
+		};
+		return middleware ? addMiddleware(descriptor, middleware) : descriptor;
+	}
 
-		middleware(middleware: ServerMiddleware | ServerMiddleware[]) {
+	function makeZodMethodSet<TArgsSchema extends Record<string, z.ZodTypeAny>>(
+		schemaDef: TArgsSchema,
+		middleware?: ServerMiddleware | ServerMiddleware[],
+	) {
+		const schema = z.object(schemaDef);
+		type InferredArgs = z.infer<typeof schema>;
+		return {
+			query: <TRet>(impl: (args: InferredArgs, ctx: SERVER_CONTEXT) => TRet | Promise<TRet>) =>
+				makeDescriptor<"query", InferredArgs, TRet>("query", impl, schema, middleware),
+			command: <TRet>(impl: (args: InferredArgs, ctx: SERVER_CONTEXT) => TRet | Promise<TRet>) =>
+				makeDescriptor<"command", InferredArgs, TRet>("command", impl, schema, middleware),
+			get: <TRet>(impl: (args: InferredArgs, ctx: SERVER_CONTEXT) => TRet | Promise<TRet>) =>
+				makeDescriptor<"get", InferredArgs, TRet>("get", impl, schema, middleware),
+		};
+	}
+
+	return {
+		query: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+			makeDescriptor("query", impl),
+		command: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+			makeDescriptor("command", impl),
+		get: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+			makeDescriptor("get", impl),
+
+		middleware(mw: ServerMiddleware | ServerMiddleware[]) {
 			return {
 				on<TARGET>(target: TARGET) {
-					addMiddleware(target, middleware);
+					addMiddleware(target, mw);
 					return target;
 				},
-				get: <ARGS, RET>(
-					implementation: (
-						args: ARGS,
-						ctx: SERVER_CONTEXT,
-					) => RET | Promise<RET>,
-				): RpcMethodImplementationDescriptor<ARGS, RET, "get"> =>
-					addMiddleware(
-						{
-							rpcType: "get",
-							implementation: implementation as (
-								args: ARGS,
-							) => RET | Promise<RET>,
-						},
-						middleware,
-					),
-				query: <ARGS, RET>(
-					implementation: (
-						args: ARGS,
-						ctx: SERVER_CONTEXT,
-					) => RET | Promise<RET>,
-				): RpcMethodImplementationDescriptor<ARGS, RET, "query"> =>
-					addMiddleware(
-						{
-							rpcType: "query",
-							implementation: implementation as (
-								args: ARGS,
-							) => RET | Promise<RET>,
-						},
-						middleware,
-					),
-				command: <ARGS, RET>(
-					implementation: (
-						args: ARGS,
-						ctx: SERVER_CONTEXT,
-					) => RET | Promise<RET>,
-				): RpcMethodImplementationDescriptor<ARGS, RET, "command"> =>
-					addMiddleware(
-						{
-							rpcType: "command",
-							implementation: implementation as (
-								args: ARGS,
-							) => RET | Promise<RET>,
-						},
-						middleware,
-					),
-				zod: <TArgsSchema extends Record<string, z.ZodTypeAny>>(
-					schemaDefinition: TArgsSchema,
-				) => {
-					const schema = z.object(schemaDefinition);
-					type InferredArgs = z.infer<typeof schema>;
-
-					return {
-						get: <TRet>(
-							implementation: (
-								args: InferredArgs,
-								ctx: SERVER_CONTEXT,
-							) => TRet | Promise<TRet>,
-						): RpcMethodImplementationDescriptor<InferredArgs, TRet, "get"> =>
-							addMiddleware(
-								{
-									rpcType: "get",
-									zodSchema: schema,
-									implementation: implementation as (
-										args: InferredArgs,
-									) => TRet | Promise<TRet>,
-								},
-								middleware,
-							),
-						query: <TRet>(
-							implementation: (
-								args: InferredArgs,
-								ctx: SERVER_CONTEXT,
-							) => TRet | Promise<TRet>,
-						): RpcMethodImplementationDescriptor<InferredArgs, TRet, "query"> =>
-							addMiddleware(
-								{
-									rpcType: "query",
-									zodSchema: schema,
-									implementation: implementation as (
-										args: InferredArgs,
-									) => TRet | Promise<TRet>,
-								},
-								middleware,
-							),
-						command: <TRet>(
-							implementation: (
-								args: InferredArgs,
-								ctx: SERVER_CONTEXT,
-							) => TRet | Promise<TRet>,
-						): RpcMethodImplementationDescriptor<
-							InferredArgs,
-							TRet,
-							"command"
-						> =>
-							addMiddleware(
-								{
-									rpcType: "command",
-									zodSchema: schema,
-									implementation: implementation as (
-										args: InferredArgs,
-									) => TRet | Promise<TRet>,
-								},
-								middleware,
-							),
-					};
-				},
+				query: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+					makeDescriptor("query", impl, undefined, mw),
+				command: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+					makeDescriptor("command", impl, undefined, mw),
+				get: <ARGS, RET>(impl: (args: ARGS, ctx: SERVER_CONTEXT) => RET | Promise<RET>) =>
+					makeDescriptor("get", impl, undefined, mw),
+				zod: <TArgsSchema extends Record<string, z.ZodTypeAny>>(schemaDef: TArgsSchema) =>
+					makeZodMethodSet(schemaDef, mw),
 			};
 		},
 
-		zod: <TArgsSchema extends Record<string, z.ZodTypeAny>>(
-			schemaDefinition: TArgsSchema,
-		) => {
-			const schema = z.object(schemaDefinition);
-			type InferredArgs = z.infer<typeof schema>;
-
-			return {
-				query: <TRet>(
-					implementation: (
-						args: InferredArgs,
-						ctx: SERVER_CONTEXT,
-					) => TRet | Promise<TRet>,
-				): RpcMethodImplementationDescriptor<InferredArgs, TRet, "query"> => ({
-					rpcType: "query",
-					zodSchema: schema,
-					implementation: implementation as (
-						args: InferredArgs,
-					) => TRet | Promise<TRet>,
-				}),
-				command: <TRet>(
-					implementation: (
-						args: InferredArgs,
-						ctx: SERVER_CONTEXT,
-					) => TRet | Promise<TRet>,
-				): RpcMethodImplementationDescriptor<
-					InferredArgs,
-					TRet,
-					"command"
-				> => ({
-					rpcType: "command",
-					zodSchema: schema,
-					implementation: implementation as (
-						args: InferredArgs,
-					) => TRet | Promise<TRet>,
-				}),
-				get: <TRet>(
-					implementation: (
-						args: InferredArgs,
-						ctx: SERVER_CONTEXT,
-					) => TRet | Promise<TRet>,
-				): RpcMethodImplementationDescriptor<InferredArgs, TRet, "get"> => ({
-					rpcType: "get",
-					zodSchema: schema,
-					implementation: implementation as (
-						args: InferredArgs,
-					) => TRet | Promise<TRet>,
-				}),
-			};
-		},
+		zod: <TArgsSchema extends Record<string, z.ZodTypeAny>>(schemaDef: TArgsSchema) =>
+			makeZodMethodSet(schemaDef),
 	};
 }
 

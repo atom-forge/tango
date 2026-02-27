@@ -29,19 +29,6 @@ export class ClientContext<RESULT = any> {
 	public readonly request: { headers: Headers };
 	/** The RPC type */
 	public readonly rpcType: "command" | "query" | "get";
-	/**
-	 * Creates a new ClientContext instance.
-	 * @param path
-	 * @param args
-	 * @param rpcType
-	 * @param options
-	 */
-
-	getArgs() {
-		const obj: Record<string, any> = {};
-		for (const [key, value] of this.args) obj[key] = value;
-		return obj;
-	}
 
 	private readonly start: number;
 
@@ -49,6 +36,14 @@ export class ClientContext<RESULT = any> {
 	get elapsedTime() {
 		return performance.now() - this.start;
 	}
+
+	/**
+	 * Creates a new ClientContext instance.
+	 * @param path - The path segments of the RPC method.
+	 * @param args - The arguments to be passed to the RPC method.
+	 * @param rpcType - The type of the RPC call (command, query, or get).
+	 * @param options - Optional configuration for the call.
+	 */
 	constructor(
 		path: string[],
 		args: Record<string, any> | undefined,
@@ -67,8 +62,14 @@ export class ClientContext<RESULT = any> {
 			},
 		};
 		this._headers = _headers;
-		this.abortSignal = options.abortSignal ? options.abortSignal : undefined;
-		this.onProgress = options.onProgress ? options.onProgress : undefined;
+		this.abortSignal = options.abortSignal;
+		this.onProgress = options.onProgress;
+	}
+
+	getArgs() {
+		const obj: Record<string, any> = {};
+		for (const [key, value] of this.args) obj[key] = value;
+		return obj;
 	}
 }
 
